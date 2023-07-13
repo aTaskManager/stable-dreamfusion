@@ -37,7 +37,7 @@ def seed_everything(seed):
     #torch.backends.cudnn.benchmark = True
 
 class StableDiffusion(nn.Module):
-    def __init__(self, device, fp16, vram_O, sd_version='2.1', hf_key=None, t_range=[0.02, 0.98]):
+    def __init__(self, device, fp16, vram_O, weights=None, sd_version='2.1', hf_key=None, t_range=[0.02, 0.98]):
         super().__init__()
 
         self.device = device
@@ -60,7 +60,10 @@ class StableDiffusion(nn.Module):
         self.precision_t = torch.float16 if fp16 else torch.float32
 
         # Create model
-        pipe = StableDiffusionPipeline.from_pretrained(model_key, torch_dtype=self.precision_t)
+        if weights is not None:
+            pipe = StableDiffusionPipeline.from_single_file(weights, torch_dtype=self.precision_t)
+        else:
+            pipe = StableDiffusionPipeline.from_pretrained(model_key, torch_dtype=self.precision_t)
 
         if vram_O:
             pipe.enable_sequential_cpu_offload()
@@ -337,6 +340,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('prompt', type=str)
     parser.add_argument('--negative', default='', type=str)
+    parser.add_argument('--weights', type=str, default=None, help="pretrained model weights")
     parser.add_argument('--sd_version', type=str, default='2.1', choices=['1.5', '2.0', '2.1'], help="stable diffusion version")
     parser.add_argument('--hf_key', type=str, default=None, help="hugging face Stable diffusion model key")
     parser.add_argument('--fp16', action='store_true', help="use float16 for training")
@@ -351,7 +355,7 @@ if __name__ == '__main__':
 
     device = torch.device('cuda')
 
-    sd = StableDiffusion(device, opt.fp16, opt.vram_O, opt.sd_version, opt.hf_key)
+    sd = StableDiffusion(device, opt.fp16, opt.vram_O, opt.weights, opt.sd_version, opt.hf_key)
 
     imgs = sd.prompt_to_img(opt.prompt, opt.negative, opt.H, opt.W, opt.steps)
 
