@@ -37,7 +37,7 @@ def seed_everything(seed):
     #torch.backends.cudnn.benchmark = True
 
 class StableDiffusion(nn.Module):
-    def __init__(self, device, fp16, vram_O, weights=None, sd_version='2.1', hf_key=None, t_range=[0.02, 0.98]):
+    def __init__(self, device, fp16, vram_O, weights=None, lora=None, sd_version='2.1', hf_key=None, t_range=[0.02, 0.98]):
         super().__init__()
 
         self.device = device
@@ -64,6 +64,9 @@ class StableDiffusion(nn.Module):
             pipe = StableDiffusionPipeline.from_single_file(weights, torch_dtype=self.precision_t)
         else:
             pipe = StableDiffusionPipeline.from_pretrained(model_key, torch_dtype=self.precision_t)
+        
+        if lora is not None:
+            pipe.unet.load_attn_procs(lora)
 
         if vram_O:
             pipe.enable_sequential_cpu_offload()
@@ -89,15 +92,6 @@ class StableDiffusion(nn.Module):
         self.alphas = self.scheduler.alphas_cumprod.to(self.device) # for convenience
 
         print(f'[INFO] loaded stable diffusion!')
-
-    @torch.no_grad()
-    def get_text_embeds(self, prompt):
-        # prompt: [str]
-
-        inputs = self.tokenizer(prompt, padding='max_length', max_length=self.tokenizer.model_max_length, return_tensors='pt')
-        embeddings = self.text_encoder(inputs.input_ids.to(self.device))[0]
-
-        return embeddings
 
 
     def train_step(self, text_embeddings, pred_rgb, guidance_scale=100, as_latent=False, grad_scale=1,
@@ -127,20 +121,6 @@ class StableDiffusion(nn.Module):
             # perform guidance (high scale from paper!)
             noise_pred_uncond, noise_pred_pos = noise_pred.chunk(2)
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_pos - noise_pred_uncond)
-
-        # import kiui
-        # latents_tmp = torch.randn((1, 4, 64, 64), device=self.device)
-        # latents_tmp = latents_tmp.detach()
-        # kiui.lo(latents_tmp)
-        # self.scheduler.set_timesteps(30)
-        # for i, t in enumerate(self.scheduler.timesteps):
-        #     latent_model_input = torch.cat([latents_tmp] * 3)
-        #     noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings)['sample']
-        #     noise_pred_uncond, noise_pred_pos = noise_pred.chunk(2)
-        #     noise_pred = noise_pred_uncond + 10 * (noise_pred_pos - noise_pred_uncond)
-        #     latents_tmp = self.scheduler.step(noise_pred, t, latents_tmp)['prev_sample']
-        # imgs = self.decode_latents(latents_tmp)
-        # kiui.vis.plot_image(imgs)
 
         # w(t), sigma_t^2
         w = (1 - self.alphas[t])
@@ -211,20 +191,6 @@ class StableDiffusion(nn.Module):
             noise_pred_uncond, noise_pred_text = unet_output[:B], unet_output[B:]
             delta_noise_preds = noise_pred_text - noise_pred_uncond.repeat(K, 1, 1, 1)
             noise_pred = noise_pred_uncond + guidance_scale * weighted_perpendicular_aggregator(delta_noise_preds, weights, B)            
-
-        # import kiui
-        # latents_tmp = torch.randn((1, 4, 64, 64), device=self.device)
-        # latents_tmp = latents_tmp.detach()
-        # kiui.lo(latents_tmp)
-        # self.scheduler.set_timesteps(30)
-        # for i, t in enumerate(self.scheduler.timesteps):
-        #     latent_model_input = torch.cat([latents_tmp] * 3)
-        #     noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings)['sample']
-        #     noise_pred_uncond, noise_pred_pos = noise_pred.chunk(2)
-        #     noise_pred = noise_pred_uncond + 10 * (noise_pred_pos - noise_pred_uncond)
-        #     latents_tmp = self.scheduler.step(noise_pred, t, latents_tmp)['prev_sample']
-        # imgs = self.decode_latents(latents_tmp)
-        # kiui.vis.plot_image(imgs)
 
         # w(t), sigma_t^2
         w = (1 - self.alphas[t])
@@ -306,6 +272,15 @@ class StableDiffusion(nn.Module):
 
         return latents
 
+    @torch.no_grad()
+    def get_text_embeds(self, prompt):
+        # prompt: [str]
+
+        inputs = self.tokenizer(prompt, padding='max_length', max_length=self.tokenizer.model_max_length, return_tensors='pt')
+        embeddings = self.text_encoder(inputs.input_ids.to(self.device))[0]
+
+        return embeddings
+
     def prompt_to_img(self, prompts, negative_prompts='', height=512, width=512, num_inference_steps=50, guidance_scale=7.5, latents=None):
 
         if isinstance(prompts, str):
@@ -341,6 +316,7 @@ if __name__ == '__main__':
     parser.add_argument('prompt', type=str)
     parser.add_argument('--negative', default='', type=str)
     parser.add_argument('--weights', type=str, default=None, help="pretrained model weights")
+    parser.add_argument('--lora', type=str, default=None, help="lora model")
     parser.add_argument('--sd_version', type=str, default='2.1', choices=['1.5', '2.0', '2.1'], help="stable diffusion version")
     parser.add_argument('--hf_key', type=str, default=None, help="hugging face Stable diffusion model key")
     parser.add_argument('--fp16', action='store_true', help="use float16 for training")
@@ -355,7 +331,7 @@ if __name__ == '__main__':
 
     device = torch.device('cuda')
 
-    sd = StableDiffusion(device, opt.fp16, opt.vram_O, opt.weights, opt.sd_version, opt.hf_key)
+    sd = StableDiffusion(device, opt.fp16, opt.vram_O, opt.weights, opt.lora, opt.sd_version, opt.hf_key)
 
     imgs = sd.prompt_to_img(opt.prompt, opt.negative, opt.H, opt.W, opt.steps)
 

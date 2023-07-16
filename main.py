@@ -86,6 +86,7 @@ if __name__ == '__main__':
     parser.add_argument('--backbone', type=str, default='grid', choices=['grid_tcnn', 'grid', 'vanilla', 'grid_taichi'], help="nerf backbone")
     parser.add_argument('--optim', type=str, default='adan', choices=['adan', 'adam'], help="optimizer")
     parser.add_argument('--weights', type=str, default=None, help="stable diffusion pretrained weights")
+    parser.add_argument('--lora', type=str, default=None, help="lora model")
     parser.add_argument('--sd_version', type=str, default='2.1', choices=['1.5', '2.0', '2.1'], help="stable diffusion version")
     parser.add_argument('--hf_key', type=str, default=None, help="hugging face Stable diffusion model key")
     # try this if CUDA OOM
@@ -380,7 +381,7 @@ if __name__ == '__main__':
 
         if 'SD' in opt.guidance:
             from guidance.sd_utils import StableDiffusion
-            guidance['SD'] = StableDiffusion(device, opt.fp16, opt.vram_O, opt.weights, opt.sd_version, opt.hf_key, opt.t_range)
+            guidance['SD'] = StableDiffusion(device, opt.fp16, opt.vram_O, opt.weights, opt.lora, opt.sd_version, opt.hf_key, opt.t_range)
 
         if 'IF' in opt.guidance:
             from guidance.if_utils import IF
